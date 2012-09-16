@@ -1,48 +1,64 @@
 #!/usr/bin/env python
+import urllib
 import yaml
 import datetime
 import rss
 from shutil import copyfile
 import os
 import Image
+import hashlib
+import imghdr
 
-def download(url,path,uid):
+debug=True
+
+def debug(text):
+    if debug:
+      print text
+
+def download_web_image(image_source_url,localfsp):
     """Copy the contents of a file from a given URL to a local file."""
-    import urllib
-    webFile = urllib.urlopen(url)
-    localFile = open(path+uid+url.split('/')[-1], 'w')
+    debug('downloading '+image_source_url)
+    debug('saved as '+localfsp)
+    webFile = urllib.urlopen(image_source_url)
+    localFile = open(localfsp,'w')
     localFile.write(webFile.read())
     webFile.close()
     localFile.close()
+
+def convert_localfile_to_jpg(local_image_file,local_jpg_file):
+  debug('converting to jpeg')
+  debug("  "+local_image_file)
+  debug("  "+local_jpg_file)
+  im=Image.open(local_image_file)
+  if im.mode != "RGB":
+    im = im.convert("RGB")
+    im.save(local_jpg_file)
 
 frameconfig=yaml.load(open('/home/matt/framer/frameconfig.yaml','r').read())
 feed=frameconfig['feedinfo']
 resources=frameconfig['resources']
 
 local_dir=feed['localdir']+"/"
+rss=rss.rss(feed['localdir']+"/"+feed['filename'],feed['title'],feed['description'])
 
-rss=rss3.rss(feed['localdir']+"/"+feed['filename'],feed['title'],feed['description'])
-
+#download each image, convert it to jpg if nessesary, move to folder and build rss
 for item in resources:
-    filename=os.path.split(item['uri'])[1]
+    # use a hash for the file name as some urls are horrendous looking filenames
+    md5= hashlib.sha224(item['uri']).hexdigest()
+    localfsp=local_dir+md5
+
+    # type can be file or web
     if item['type']=='file':
-	dst=local_dir+item['uid']+filename
-	copyfile(item['uri'], dst)
-        rss.additem(item['title'],feed['link']+item['uid']+filename)
+      debug('file')
+      debug('copying '+item['uri']+' to '+localfsp)
+      copyfile(item['uri'], localfsp)
     else:
-	download(item['uri'],local_dir,item['uid'])
-	f, e = os.path.splitext(item['uid']+filename)
-	if e.lower()==".jpg" or e.lower()=='jpeg':
-	    print 'adding'
-	    rss.additem(item['title'],item['uri'])
-	else:
-	    print 'converting.. '+local_dir+item['uid']+filename
-	    im=Image.open(local_dir+item['uid']+filename)
-	    if im.mode != "RGB":
-		im = im.convert("RGB")
-	    print 'saving... '+local_dir+f+'.jpg'
-	    im.save(local_dir+f+'.jpg')
-	    rss.additem(item['title'],feed['link']+f+'.jpg')
+      debug('web')
+      download_web_image(item['uri'],localfsp)
+      if not imghdr.what(localfsp)=='jpeg':
+        convert_localfile_to_jpg(localfsp,localfsp+'.jpeg')
+
+    rss.additem(item['title'],feed['link']+md5)
 
 rss.save()
 print rss.xml
